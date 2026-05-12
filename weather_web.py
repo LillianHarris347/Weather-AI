@@ -113,14 +113,9 @@ def get_hourly_forecast_48h(lat, lon):
     params = {
         "latitude": lat,
         "longitude": lon,
-        "hourly": [
-            "temperature_2m",
-            "weather_code",
-            "precipitation",
-            "wind_speed_10m"
-        ],
+        "hourly": ["temperature_2m", "weather_code", "precipitation", "wind_speed_10m"],
         "timezone": "auto",
-        "forecast_days": 2  # 2 дня = 48 часов
+        "forecast_days": 2
     }
     try:
         response = requests.get(url, params=params, timeout=15)
@@ -134,29 +129,23 @@ def get_hourly_forecast_48h(lat, lon):
         precip = hourly.get("precipitation", [])
         winds = hourly.get("wind_speed_10m", [])
         
-        # Берём до 48 часов (сколько есть в ответе)
-        max_hours = min(48, len(times))
         result = []
+        now_date = datetime.now().date()
         
-        for i in range(max_hours):
+        for i in range(min(48, len(times))):
             dt = datetime.fromisoformat(times[i])
-            # Определяем, сегодня это или завтра
-            now = datetime.now()
-            if dt.date() == now.date():
-                day_label = ""
-            else:
-                day_label = " (завтра)"
+            day_label = "" if dt.date() == now_date else " (завтра)"
             
             result.append({
-                "time": f"{dt.strftime('%H:%00')}{day_label}",
-                "datetime": dt.strftime("%d.%m %H:%00"),
-                "temp": temps[i],
+                "time": f"{dt.strftime('%H:00')}{day_label}",
+                "datetime": dt.strftime("%d.%m %H:00"),
+                "temp": round(temps[i], 1),
                 "code": codes[i],
-                "precip": precip[i],
-                "wind": winds[i]
+                "precip": round(precip[i], 1) if precip[i] else 0,
+                "wind": round(winds[i], 1)
             })
         
-        print(f"✅ Почасовой прогноз на {len(result)} часов получен")
+        print(f"✅ Почасовой прогноз на {len(result)} часов")
         return result
     except Exception as e:
         print(f"⚠️ Ошибка почасового прогноза: {e}")
