@@ -2,15 +2,13 @@ from flask import Flask, request, render_template_string, jsonify
 import requests
 import re
 from geopy.geocoders import Nominatim
-from datetime import datetime
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
-# ==================== НАСТРОЙКИ ====================
-CREATOR_NAME = "Соловьев Дмитрий Владимирович"
+CREATOR_NAME = "Ваше Имя"
 AI_NAME = "WeatherAI"
 
-# ==================== ГЕОКОДИНГ ====================
 def get_coords(city):
     geolocator = Nominatim(user_agent="weather_bot_russia", timeout=10)
     try:
@@ -24,7 +22,6 @@ def get_coords(city):
         pass
     return None, None
 
-# ==================== ПОГОДА ====================
 def get_current(lat, lon):
     url = "https://api.open-meteo.com/v1/forecast"
     params = {
@@ -78,526 +75,292 @@ def get_weekly(lat, lon):
     except:
         return None
 
+# === НОВАЯ ФУНКЦИЯ: ПОЧАСОВОЙ ПРОГНОЗ НА 24 ЧАСА ===
+def get_hourly(lat, lon):
+    url = "https://api.open-meteo.com/v1/forecast"
+    params = {
+        "latitude": lat, "longitude": lon,
+        "hourly": ["temperature_2m", "weather_code", "precipitation", "wind_speed_10m"],
+        "timezone": "auto",
+        "forecast_days": 1,       # только сегодня
+        "hourly": "temperature_2m,weather_code,precipitation,wind_speed_10m"
+    }
+    try:
+        r = requests.get(url, params=params, timeout=10)
+        data = r.json()
+        hourly = data.get("hourly", {})
+        times = hourly.get("time", [])
+        temps = hourly.get("temperature_2m", [])
+        codes = hourly.get("weather_code", [])
+        precip = hourly.get("precipitation", [])
+        winds = hourly.get("wind_speed_10m", [])
+        
+        result = []
+        # Берём первые 24 часа (или сколько есть)
+        for i in range(min(24, len(times))):
+            dt = datetime.fromisoformat(times[i])
+            hour_str = dt.strftime("%H:00")
+            result.append({
+                "time": hour_str,
+                "temp": temps[i],
+                "code": codes[i],
+                "precip": precip[i],
+                "wind": winds[i]
+            })
+        return result
+    except Exception as e:
+        print("Hourly error:", e)
+        return None
+
 def code2text(code):
     if code == 0: return "Ясно ☀️"
     if 1 <= code <= 3: return "Малооблачно ⛅"
     if code in (45, 48): return "Туман 🌫️"
     if 51 <= code <= 55: return "Морось 🌦️"
     if 61 <= code <= 65: return "Дождь 🌧️"
+    if 66 <= code <= 67: return "Ледяной дождь ❄️🌧️"
     if 71 <= code <= 75: return "Снег 🌨️"
+    if 80 <= code <= 82: return "Ливень ☔"
+    if 85 <= code <= 86: return "Снегопад ❄️☔"
     if code >= 95: return "Гроза ⛈️"
     return "Облачно 🌥️"
 
-# ==================== ФУНКЦИЯ РЕКОМЕНДАЦИЙ ПО ОДЕЖДЕ ====================
+# === РЕКОМЕНДАЦИИ ПО ОДЕЖДЕ ===
 def get_clothing_recommendation(temp, feels, wind, precip, condition_text):
-    """Возвращает советы по одежде на основе погоды"""
     recommendations = []
-    
-    # Рекомендации по температуре
     if temp <= -25:
-        recommendations.append("🧥 Арктический холод! Одевайся максимально тепло: пуховик, термобельё, две шапки, шарф, варежки.")
+        recommendations.append("🧥 Арктический холод! Пуховик, термобельё, две шапки.")
     elif temp <= -15:
-        recommendations.append("🥶 Очень холодно! Нужен пуховик, тёплая шапка, шарф, перчатки и тёплая обувь.")
+        recommendations.append("🥶 Очень холодно! Пуховик, тёплая шапка, шарф, перчатки.")
     elif temp <= -5:
-        recommendations.append("🧣 Холодно. Надевай зимнюю куртку, шапку, шарф и перчатки.")
+        recommendations.append("🧣 Холодно. Зимняя куртка, шапка, шарф, перчатки.")
     elif temp <= 0:
-        recommendations.append("🧥 Прохладно. Зимняя куртка или плотное пальто, шапка, шарф.")
+        recommendations.append("🧥 Прохладно. Зимняя куртка или плотное пальто, шапка.")
     elif temp <= 5:
-        recommendations.append("🧥 Зябко. Демисезонная куртка или пальто, шапка, шарф.")
+        recommendations.append("🧥 Зябко. Демисезонная куртка, шапка, шарф.")
     elif temp <= 10:
-        recommendations.append("🧥 Прохладно. Лёгкая куртка или ветровка. Шарф не помешает.")
+        recommendations.append("🧥 Свежо. Лёгкая куртка или ветровка.")
     elif temp <= 15:
-        recommendations.append("🧥 Свежо. Кофта или толстовка + куртка. Шапка уже не нужна.")
+        recommendations.append("🧥 Тепло? Кофта + куртка. Шапка не нужна.")
     elif temp <= 20:
-        recommendations.append("👕 Тепло. Можно одеться легко: футболка и джинсы. На вечер — кофта.")
+        recommendations.append("👕 Тепло. Футболка и джинсы. На вечер — кофта.")
     elif temp <= 25:
-        recommendations.append("☀️ Очень тепло! Футболка, шорты/лёгкие брюки. Не забудь кепку или панаму.")
+        recommendations.append("☀️ Очень тепло! Футболка, шорты, кепка.")
     else:
-        recommendations.append("🩳 Жарко! Лёгкая одежда, шорты, панама, обязательно пей воду!")
-    
-    # Рекомендации по ветру
+        recommendations.append("🩳 Жарко! Лёгкая одежда, панама, пей воду.")
     if wind >= 25:
-        recommendations.append("💨 Сильный ветер! Ветровка обязательно, даже если тепло.")
+        recommendations.append("💨 Сильный ветер! Ветровка обязательна.")
     elif wind >= 15:
-        recommendations.append("🍃 Ветрено. Застегнись или накинь ветровку.")
-    
-    # Рекомендации по осадкам
-    if precip > 5:
-        recommendations.append("☔ Ожидаются осадки. Возьми зонт или дождевик.")
-    elif "дождь" in condition_text.lower() or "ливень" in condition_text.lower():
-        recommendations.append("☔ Идёт дождь. Не забудь зонт и непромокаемую обувь.")
-    elif "снег" in condition_text.lower():
-        recommendations.append("❄️ Идёт снег. Одевайся теплее, обувь должна быть непромокаемой.")
-    
-    # Финальный короткий вердикт (для отображения в заголовке)
-    if temp <= 0:
-        short = "Очень холодно ❄️"
-    elif temp <= 10:
-        short = "Прохладно 🧥"
-    elif temp <= 20:
-        short = "Тепло ☀️"
-    else:
-        short = "Жарко 🩳"
-    
-    return {
-        "short": short,
-        "full": " • ".join(recommendations) if recommendations else "Одевайся по погоде, чувствуй себя комфортно!"
-    }
+        recommendations.append("🍃 Ветрено. Застегнись.")
+    if precip > 5 or "дождь" in condition_text.lower():
+        recommendations.append("☔ Осадки — возьми зонт.")
+    short = "Очень холодно ❄️" if temp <= 0 else "Прохладно 🧥" if temp <= 10 else "Тепло ☀️" if temp <= 20 else "Жарко 🩳"
+    return {"short": short, "full": " • ".join(recommendations) if recommendations else "Одевайся по погоде."}
 
-# ==================== HTML ШАБЛОН (с блоком рекомендаций) ====================
+# === HTML-шаблон с тремя режимами ===
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-    <title>{{ ai_name }} — Погода + Советы по одежде</title>
+    <title>{{ ai_name }} — Почасовой прогноз + Одежда</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             padding: 20px;
         }
-        .container {
-            max-width: 600px;
-            margin: 0 auto;
-        }
-        .card {
-            background: white;
-            border-radius: 25px;
-            padding: 24px;
-            margin-bottom: 20px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-        }
-        h1 {
-            font-size: 24px;
-            color: #333;
-            text-align: center;
-            margin-bottom: 8px;
-        }
-        .subtitle {
-            text-align: center;
-            color: #666;
-            font-size: 14px;
-            margin-bottom: 20px;
-            padding-bottom: 16px;
-            border-bottom: 1px solid #eee;
-        }
-        .creator {
-            text-align: center;
-            font-size: 12px;
-            color: #888;
-            margin-top: 8px;
-        }
-        .search-box {
-            display: flex;
-            gap: 12px;
-            margin-bottom: 20px;
-        }
-        input {
-            flex: 1;
-            padding: 14px 18px;
-            border: 2px solid #e0e0e0;
-            border-radius: 30px;
-            font-size: 16px;
-            outline: none;
-            transition: border 0.3s;
-        }
-        input:focus {
-            border-color: #667eea;
-        }
-        button {
-            padding: 14px 24px;
-            background: #667eea;
-            color: white;
-            border: none;
-            border-radius: 30px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.2s, background 0.2s;
-        }
-        button:active {
-            transform: scale(0.96);
-        }
-        .period-buttons {
-            display: flex;
-            gap: 12px;
-            margin-bottom: 20px;
-        }
-        .period-btn {
-            flex: 1;
-            padding: 12px;
-            background: #f0f0f0;
-            color: #666;
-            border: none;
-            border-radius: 30px;
-            font-size: 14px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        .period-btn.active {
-            background: #667eea;
-            color: white;
-        }
-        .weather-card {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border-radius: 25px;
-            padding: 24px;
-            text-align: center;
-        }
-        .temp {
-            font-size: 64px;
-            font-weight: bold;
-            margin: 16px 0;
-        }
-        .feels {
-            font-size: 16px;
-            opacity: 0.9;
-        }
-        .weather-details {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 16px;
-            margin-top: 24px;
-            padding-top: 16px;
-            border-top: 1px solid rgba(255,255,255,0.3);
-        }
-        .detail {
-            text-align: center;
-        }
-        .detail-value {
-            font-size: 20px;
-            font-weight: bold;
-        }
-        .detail-label {
-            font-size: 12px;
-            opacity: 0.8;
-            margin-top: 4px;
-        }
-        .clothing-card {
-            background: #fff8e7;
-            border-left: 5px solid #ff9800;
-            border-radius: 16px;
-            padding: 16px;
-            margin-top: 20px;
-            text-align: left;
-        }
-        .clothing-title {
-            font-weight: bold;
-            font-size: 18px;
-            color: #333;
-            margin-bottom: 8px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .clothing-recommendation {
-            font-size: 15px;
-            color: #555;
-            line-height: 1.4;
-        }
-        .forecast {
-            margin-top: 20px;
-        }
-        .forecast-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 12px 0;
-            border-bottom: 1px solid #eee;
-        }
-        .forecast-date {
-            width: 80px;
-            font-weight: 600;
-        }
-        .forecast-temp {
-            width: 80px;
-            text-align: center;
-        }
-        .forecast-desc {
-            flex: 1;
-            text-align: center;
-        }
-        .forecast-wind {
-            width: 70px;
-            text-align: right;
-            font-size: 12px;
-            color: #666;
-        }
-        .loader {
-            text-align: center;
-            padding: 40px;
-            display: none;
-        }
-        .error {
-            background: #fee;
-            color: #c33;
-            padding: 16px;
-            border-radius: 16px;
-            text-align: center;
-            margin-top: 16px;
-        }
-        .city-name {
-            font-size: 28px;
-            font-weight: bold;
-            margin-bottom: 8px;
-        }
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-        .spinner {
-            width: 40px;
-            height: 40px;
-            border: 4px solid #e0e0e0;
-            border-top-color: #667eea;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-            margin: 0 auto;
-        }
-        footer {
-            text-align: center;
-            color: rgba(255,255,255,0.7);
-            font-size: 12px;
-            padding: 20px;
-        }
+        .container { max-width: 600px; margin: 0 auto; }
+        .card { background: white; border-radius: 25px; padding: 24px; margin-bottom: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); }
+        h1 { font-size: 24px; text-align: center; margin-bottom: 8px; }
+        .subtitle { text-align: center; color: #666; font-size: 14px; margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 16px; }
+        .search-box { display: flex; gap: 12px; margin-bottom: 20px; }
+        input { flex: 1; padding: 14px 18px; border: 2px solid #e0e0e0; border-radius: 30px; font-size: 16px; outline: none; }
+        input:focus { border-color: #667eea; }
+        button { padding: 14px 24px; background: #667eea; color: white; border: none; border-radius: 30px; font-weight: 600; cursor: pointer; transition: transform 0.2s; }
+        button:active { transform: scale(0.96); }
+        .period-buttons { display: flex; gap: 12px; margin-bottom: 20px; }
+        .period-btn { flex: 1; padding: 12px; background: #f0f0f0; color: #666; border: none; border-radius: 30px; font-size: 14px; cursor: pointer; }
+        .period-btn.active { background: #667eea; color: white; }
+        .weather-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 25px; padding: 24px; text-align: center; }
+        .temp { font-size: 64px; font-weight: bold; margin: 16px 0; }
+        .clothing-card { background: #fff8e7; border-left: 5px solid #ff9800; border-radius: 16px; padding: 16px; margin-top: 20px; text-align: left; }
+        .clothing-title { font-weight: bold; font-size: 18px; display: flex; align-items: center; gap: 8px; }
+        .hourly-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px,1fr)); gap: 12px; margin-top: 20px; }
+        .hour-item { background: rgba(255,255,255,0.2); border-radius: 16px; padding: 12px; text-align: center; backdrop-filter: blur(4px); }
+        .hour-time { font-weight: bold; font-size: 16px; margin-bottom: 6px; }
+        .hour-temp { font-size: 20px; font-weight: bold; }
+        .hour-desc { font-size: 12px; opacity: 0.9; margin-top: 4px; }
+        .forecast-item { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #eee; }
+        .loader { text-align: center; padding: 40px; display: none; }
+        .error { background: #fee; color: #c33; padding: 16px; border-radius: 16px; text-align: center; margin-top: 16px; }
+        .spinner { width: 40px; height: 40px; border: 4px solid #e0e0e0; border-top-color: #667eea; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        footer { text-align: center; color: rgba(255,255,255,0.7); font-size: 12px; padding: 20px; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="card">
-            <h1>🌤 {{ ai_name }}</h1>
-            <div class="subtitle">Погода + Советы по одежде 👕</div>
-            
-            <div class="search-box">
-                <input type="text" id="cityInput" placeholder="Например: Москва, Алатырь, Сочи" value="">
-                <button onclick="getWeather()">🔍</button>
-            </div>
-            
-            <div class="period-buttons">
-                <button class="period-btn" id="todayBtn" onclick="setPeriod('today')">🌡 СЕГОДНЯ</button>
-                <button class="period-btn" id="weekBtn" onclick="setPeriod('week')">📅 НЕДЕЛЯ</button>
-            </div>
-            
-            <div id="loader" class="loader">
-                <div class="spinner"></div>
-                <p style="margin-top: 12px;">Загружаем погоду...</p>
-            </div>
-            
-            <div id="weatherResult"></div>
+<div class="container">
+    <div class="card">
+        <h1>🌤 {{ ai_name }}</h1>
+        <div class="subtitle">Погода + одежда + почасовой прогноз</div>
+        <div class="search-box">
+            <input type="text" id="cityInput" placeholder="Например: Алатырь, Москва" value="Алатырь">
+            <button onclick="getWeather()">🔍</button>
         </div>
-        <footer>
-            Создатель: {{ creator_name }}<br>
-            Данные: Open-Meteo API
-        </footer>
+        <div class="period-buttons">
+            <button class="period-btn" id="todayBtn" onclick="setPeriod('today')">🌡 СЕГОДНЯ</button>
+            <button class="period-btn" id="hourlyBtn" onclick="setPeriod('hourly')">⏰ ПОЧАСОВО</button>
+            <button class="period-btn" id="weekBtn" onclick="setPeriod('week')">📅 НЕДЕЛЯ</button>
+        </div>
+        <div id="loader" class="loader"><div class="spinner"></div><p>Загрузка...</p></div>
+        <div id="weatherResult"></div>
     </div>
-    
-    <script>
-        let currentPeriod = 'today';
-        
-        function setPeriod(period) {
-            currentPeriod = period;
-            document.getElementById('todayBtn').classList.remove('active');
-            document.getElementById('weekBtn').classList.remove('active');
-            document.getElementById(period + 'Btn').classList.add('active');
-            getWeather();
-        }
-        
-        async function getWeather() {
-            const city = document.getElementById('cityInput').value.trim();
-            if (!city) {
-                alert('Введите название города');
-                return;
+    <footer>Создатель: {{ creator_name }}<br>Данные: Open-Meteo API</footer>
+</div>
+<script>
+    let currentPeriod = 'today';
+    function setPeriod(period) {
+        currentPeriod = period;
+        document.getElementById('todayBtn').classList.remove('active');
+        document.getElementById('hourlyBtn').classList.remove('active');
+        document.getElementById('weekBtn').classList.remove('active');
+        document.getElementById(period + 'Btn').classList.add('active');
+        getWeather();
+    }
+    async function getWeather() {
+        const city = document.getElementById('cityInput').value.trim();
+        if (!city) { alert('Введите город'); return; }
+        document.getElementById('loader').style.display = 'block';
+        document.getElementById('weatherResult').innerHTML = '';
+        try {
+            const res = await fetch('/weather', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ city: city, period: currentPeriod })
+            });
+            const data = await res.json();
+            if (data.error) {
+                document.getElementById('weatherResult').innerHTML = `<div class="error">❌ ${data.error}</div>`;
+            } else if (currentPeriod === 'today') {
+                displayCurrent(data);
+            } else if (currentPeriod === 'hourly') {
+                displayHourly(data);
+            } else {
+                displayWeekly(data);
             }
-            
-            document.getElementById('loader').style.display = 'block';
-            document.getElementById('weatherResult').innerHTML = '';
-            
-            try {
-                const response = await fetch('/weather', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ city: city, period: currentPeriod })
-                });
-                const data = await response.json();
-                
-                if (data.error) {
-                    document.getElementById('weatherResult').innerHTML = `<div class="error">❌ ${data.error}</div>`;
-                } else if (currentPeriod === 'today') {
-                    displayCurrentWeather(data);
-                } else {
-                    displayWeeklyForecast(data);
-                }
-            } catch (error) {
-                document.getElementById('weatherResult').innerHTML = `<div class="error">❌ Ошибка соединения</div>`;
-            } finally {
-                document.getElementById('loader').style.display = 'none';
-            }
+        } catch(e) {
+            document.getElementById('weatherResult').innerHTML = '<div class="error">❌ Ошибка соединения</div>';
+        } finally {
+            document.getElementById('loader').style.display = 'none';
         }
-        
-        function displayCurrentWeather(data) {
-            const clothingHtml = data.clothing ? `
-                <div class="clothing-card">
-                    <div class="clothing-title">
-                        <span>👗 ${data.clothing.short}</span>
-                    </div>
-                    <div class="clothing-recommendation">
-                        ${data.clothing.full}
-                    </div>
+    }
+    function displayCurrent(data) {
+        const clothingHtml = data.clothing ? `
+            <div class="clothing-card">
+                <div class="clothing-title">👗 ${data.clothing.short}</div>
+                <div>${data.clothing.full}</div>
+            </div>` : '';
+        const html = `
+            <div class="weather-card">
+                <div class="city-name">${data.city}</div>
+                <div class="temp">${data.temp}°C</div>
+                <div class="feels">Ощущается ${data.feels}°C</div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:20px;">
+                    <div>💧 Влажность ${data.humidity}%</div>
+                    <div>💨 Ветер ${data.wind} км/ч</div>
+                    <div>☁️ Облачность ${data.clouds}%</div>
+                    <div>🌧 Осадки ${data.precip} мм</div>
+                    <div>🧭 Давление ${data.pressure} мм</div>
+                    <div>${data.condition}</div>
                 </div>
-            ` : '';
-            
-            const html = `
-                <div class="weather-card">
-                    <div class="city-name">${data.city}</div>
-                    <div class="temp">${data.temp}°C</div>
-                    <div class="feels">Ощущается как ${data.feels}°C</div>
-                    <div class="weather-details">
-                        <div class="detail">
-                            <div class="detail-value">${data.humidity}%</div>
-                            <div class="detail-label">Влажность</div>
-                        </div>
-                        <div class="detail">
-                            <div class="detail-value">${data.wind} км/ч</div>
-                            <div class="detail-label">Ветер</div>
-                        </div>
-                        <div class="detail">
-                            <div class="detail-value">${data.clouds}%</div>
-                            <div class="detail-label">Облачность</div>
-                        </div>
-                        <div class="detail">
-                            <div class="detail-value">${data.precip} мм</div>
-                            <div class="detail-label">Осадки</div>
-                        </div>
-                        <div class="detail">
-                            <div class="detail-value">${data.pressure} мм</div>
-                            <div class="detail-label">Давление</div>
-                        </div>
-                        <div class="detail">
-                            <div class="detail-value">${data.condition}</div>
-                            <div class="detail-label">Состояние</div>
-                        </div>
-                    </div>
-                </div>
-                ${clothingHtml}
-            `;
-            document.getElementById('weatherResult').innerHTML = html;
+            </div>${clothingHtml}`;
+        document.getElementById('weatherResult').innerHTML = html;
+    }
+    function displayHourly(data) {
+        let items = '';
+        for (let h of data) {
+            items += `
+                <div class="hour-item">
+                    <div class="hour-time">${h.time}</div>
+                    <div class="hour-temp">${h.temp}°C</div>
+                    <div class="hour-desc">${h.condition}</div>
+                    <div class="hour-desc">💨 ${h.wind} км/ч</div>
+                    <div class="hour-desc">🌧 ${h.precip} мм</div>
+                </div>`;
         }
-        
-        function displayWeeklyForecast(data) {
-            let daysHtml = '<div class="weather-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; text-align: left;"><div style="text-align: center; font-size: 20px; margin-bottom: 16px;">📅 ПРОГНОЗ НА НЕДЕЛЮ</div><div class="forecast">';
-            
-            for (let day of data) {
-                daysHtml += `
-                    <div class="forecast-item">
-                        <div class="forecast-date">${day.date}</div>
-                        <div class="forecast-temp">${day.tmin}→${day.tmax}°C</div>
-                        <div class="forecast-desc">${day.condition}</div>
-                        <div class="forecast-wind">💨${day.wind}</div>
-                    </div>
-                `;
-            }
-            daysHtml += '</div></div>';
-            document.getElementById('weatherResult').innerHTML = daysHtml;
+        const html = `<div class="weather-card"><div style="font-size:20px; margin-bottom:12px;">⏰ ПОЧАСОВОЙ ПРОГНОЗ (24 часа)</div><div class="hourly-grid">${items}</div></div>`;
+        document.getElementById('weatherResult').innerHTML = html;
+    }
+    function displayWeekly(data) {
+        let rows = '';
+        for (let d of data) {
+            rows += `<div class="forecast-item"><span>${d.date}</span><span>${d.tmin}→${d.tmax}°C</span><span>${d.condition}</span><span>💨${d.wind}</span><span>🌧${d.precip}мм</span></div>`;
         }
-        
-        window.onload = function() {
-            // Можно загрузить погоду для Москвы по умолчанию
-            document.getElementById('cityInput').value = 'Москва';
-            getWeather();
-        }
-    </script>
+        document.getElementById('weatherResult').innerHTML = `<div class="weather-card"><div style="font-size:20px;">📅 НЕДЕЛЯ</div>${rows}</div>`;
+    }
+    window.onload = () => { getWeather(); };
+</script>
 </body>
 </html>
 """
 
-# ==================== API МАРШРУТЫ ====================
+# === API МАРШРУТЫ ===
 @app.route('/')
 def index():
-    return render_template_string(HTML_TEMPLATE, 
-                                  ai_name=AI_NAME, 
-                                  creator_name=CREATOR_NAME)
+    return render_template_string(HTML_TEMPLATE, ai_name=AI_NAME, creator_name=CREATOR_NAME)
 
 @app.route('/weather', methods=['POST'])
 def weather():
     data = request.get_json()
     city = data.get('city', '').strip()
     period = data.get('period', 'today')
-    
     if not city:
-        return jsonify({'error': 'Введите название города'})
-    
+        return jsonify({'error': 'Введите город'})
     lat, lon = get_coords(city)
     if lat is None:
-        return jsonify({'error': f'Город "{city}" не найден'})
+        return jsonify({'error': f'Город {city} не найден'})
     
     if period == 'today':
         w = get_current(lat, lon)
         if not w:
-            return jsonify({'error': 'Не удалось получить погоду'})
+            return jsonify({'error': 'Ошибка получения погоды'})
         press_mm = round(w['press'] * 0.75006) if w['press'] else 0
         condition = code2text(w['code'])
-        
-        # Получаем рекомендации по одежде
-        clothing = get_clothing_recommendation(
-            temp=w['temp'],
-            feels=w['feels'],
-            wind=w['wind'],
-            precip=w['precip'],
-            condition_text=condition
-        )
-        
+        clothing = get_clothing_recommendation(w['temp'], w['feels'], w['wind'], w['precip'], condition)
         return jsonify({
             'city': city.title(),
-            'temp': w['temp'],
-            'feels': w['feels'],
-            'humidity': w['humidity'],
-            'wind': w['wind'],
-            'clouds': w['clouds'],
-            'precip': w['precip'],
-            'pressure': press_mm,
-            'condition': condition,
-            'clothing': clothing
+            'temp': w['temp'], 'feels': w['feels'], 'humidity': w['humidity'],
+            'wind': w['wind'], 'clouds': w['clouds'], 'precip': w['precip'],
+            'pressure': press_mm, 'condition': condition, 'clothing': clothing
         })
-    else:
+    elif period == 'hourly':
+        hourly = get_hourly(lat, lon)
+        if not hourly:
+            return jsonify({'error': 'Не удалось получить почасовой прогноз'})
+        # добавим текстовое описание погоды
+        for h in hourly:
+            h['condition'] = code2text(h['code'])
+        return jsonify(hourly)
+    else:  # week
         week = get_weekly(lat, lon)
         if not week:
-            return jsonify({'error': 'Не удалось получить прогноз'})
-        
-        ru_days = ["ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ", "ВС"]
+            return jsonify({'error': 'Ошибка прогноза на неделю'})
+        ru_days = ["ПН","ВТ","СР","ЧТ","ПТ","СБ","ВС"]
         result = []
         for i, d in enumerate(week):
             dt = datetime.strptime(d['date'], "%Y-%m-%d")
             result.append({
                 'date': f"{dt.strftime('%d.%m')} ({ru_days[dt.weekday()]})",
-                'tmin': d['tmin'],
-                'tmax': d['tmax'],
+                'tmin': d['tmin'], 'tmax': d['tmax'],
                 'condition': code2text(d['code']),
-                'wind': d['wind'],
-                'precip': d['precip']
+                'wind': d['wind'], 'precip': d['precip']
             })
         return jsonify(result)
 
 if __name__ == '__main__':
-    print("\n" + "="*60)
-    print(f"🌤 {AI_NAME} — ВЕБ-СЕРВЕР С РЕКОМЕНДАЦИЯМИ ПО ОДЕЖДЕ 🌤")
-    print("="*60)
-    print("\n📱 ДЛЯ ДОСТУПА С ТЕЛЕФОНА (в одной Wi-Fi сети):")
-    print("\nШАГ 1: Узнайте IP вашего компьютера:")
-    print("   Откройте cmd и введите: ipconfig")
-    print("   Найдите IPv4-адрес (например: 192.168.1.100)")
-    print("\nШАГ 2: На телефоне откройте браузер и введите:")
-    print(f"   http://ВАШ_IP:5000")
-    print("\nШАГ 3 (альтернатива — на этом же компьютере):")
-    print("   http://localhost:5000")
-    print("\n" + "="*60)
-    print("Нажмите Ctrl+C для остановки сервера\n")
-    
+    print("\n🌤 СЕРВЕР ЗАПУЩЕН → http://localhost:5000")
     app.run(host='0.0.0.0', port=5000, debug=False)
