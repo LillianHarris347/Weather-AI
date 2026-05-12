@@ -88,14 +88,70 @@ def code2text(code):
     if code >= 95: return "Гроза ⛈️"
     return "Облачно 🌥️"
 
-# ==================== HTML ШАБЛОН (красивый интерфейс для телефона) ====================
+# ==================== ФУНКЦИЯ РЕКОМЕНДАЦИЙ ПО ОДЕЖДЕ ====================
+def get_clothing_recommendation(temp, feels, wind, precip, condition_text):
+    """Возвращает советы по одежде на основе погоды"""
+    recommendations = []
+    
+    # Рекомендации по температуре
+    if temp <= -25:
+        recommendations.append("🧥 Арктический холод! Одевайся максимально тепло: пуховик, термобельё, две шапки, шарф, варежки.")
+    elif temp <= -15:
+        recommendations.append("🥶 Очень холодно! Нужен пуховик, тёплая шапка, шарф, перчатки и тёплая обувь.")
+    elif temp <= -5:
+        recommendations.append("🧣 Холодно. Надевай зимнюю куртку, шапку, шарф и перчатки.")
+    elif temp <= 0:
+        recommendations.append("🧥 Прохладно. Зимняя куртка или плотное пальто, шапка, шарф.")
+    elif temp <= 5:
+        recommendations.append("🧥 Зябко. Демисезонная куртка или пальто, шапка, шарф.")
+    elif temp <= 10:
+        recommendations.append("🧥 Прохладно. Лёгкая куртка или ветровка. Шарф не помешает.")
+    elif temp <= 15:
+        recommendations.append("🧥 Свежо. Кофта или толстовка + куртка. Шапка уже не нужна.")
+    elif temp <= 20:
+        recommendations.append("👕 Тепло. Можно одеться легко: футболка и джинсы. На вечер — кофта.")
+    elif temp <= 25:
+        recommendations.append("☀️ Очень тепло! Футболка, шорты/лёгкие брюки. Не забудь кепку или панаму.")
+    else:
+        recommendations.append("🩳 Жарко! Лёгкая одежда, шорты, панама, обязательно пей воду!")
+    
+    # Рекомендации по ветру
+    if wind >= 25:
+        recommendations.append("💨 Сильный ветер! Ветровка обязательно, даже если тепло.")
+    elif wind >= 15:
+        recommendations.append("🍃 Ветрено. Застегнись или накинь ветровку.")
+    
+    # Рекомендации по осадкам
+    if precip > 5:
+        recommendations.append("☔ Ожидаются осадки. Возьми зонт или дождевик.")
+    elif "дождь" in condition_text.lower() or "ливень" in condition_text.lower():
+        recommendations.append("☔ Идёт дождь. Не забудь зонт и непромокаемую обувь.")
+    elif "снег" in condition_text.lower():
+        recommendations.append("❄️ Идёт снег. Одевайся теплее, обувь должна быть непромокаемой.")
+    
+    # Финальный короткий вердикт (для отображения в заголовке)
+    if temp <= 0:
+        short = "Очень холодно ❄️"
+    elif temp <= 10:
+        short = "Прохладно 🧥"
+    elif temp <= 20:
+        short = "Тепло ☀️"
+    else:
+        short = "Жарко 🩳"
+    
+    return {
+        "short": short,
+        "full": " • ".join(recommendations) if recommendations else "Одевайся по погоде, чувствуй себя комфортно!"
+    }
+
+# ==================== HTML ШАБЛОН (с блоком рекомендаций) ====================
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-    <title>{{ ai_name }} — Погода в России</title>
+    <title>{{ ai_name }} — Погода + Советы по одежде</title>
     <style>
         * {
             margin: 0;
@@ -226,6 +282,28 @@ HTML_TEMPLATE = """
             opacity: 0.8;
             margin-top: 4px;
         }
+        .clothing-card {
+            background: #fff8e7;
+            border-left: 5px solid #ff9800;
+            border-radius: 16px;
+            padding: 16px;
+            margin-top: 20px;
+            text-align: left;
+        }
+        .clothing-title {
+            font-weight: bold;
+            font-size: 18px;
+            color: #333;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .clothing-recommendation {
+            font-size: 15px;
+            color: #555;
+            line-height: 1.4;
+        }
         .forecast {
             margin-top: 20px;
         }
@@ -296,10 +374,10 @@ HTML_TEMPLATE = """
     <div class="container">
         <div class="card">
             <h1>🌤 {{ ai_name }}</h1>
-            <div class="subtitle">Погода в любом городе России</div>
+            <div class="subtitle">Погода + Советы по одежде 👕</div>
             
             <div class="search-box">
-                <input type="text" id="cityInput" placeholder="Например: Москва, Алатырь, Сочи" value="{{ last_city }}">
+                <input type="text" id="cityInput" placeholder="Например: Москва, Алатырь, Сочи" value="">
                 <button onclick="getWeather()">🔍</button>
             </div>
             
@@ -365,6 +443,17 @@ HTML_TEMPLATE = """
         }
         
         function displayCurrentWeather(data) {
+            const clothingHtml = data.clothing ? `
+                <div class="clothing-card">
+                    <div class="clothing-title">
+                        <span>👗 ${data.clothing.short}</span>
+                    </div>
+                    <div class="clothing-recommendation">
+                        ${data.clothing.full}
+                    </div>
+                </div>
+            ` : '';
+            
             const html = `
                 <div class="weather-card">
                     <div class="city-name">${data.city}</div>
@@ -397,6 +486,7 @@ HTML_TEMPLATE = """
                         </div>
                     </div>
                 </div>
+                ${clothingHtml}
             `;
             document.getElementById('weatherResult').innerHTML = html;
         }
@@ -418,10 +508,10 @@ HTML_TEMPLATE = """
             document.getElementById('weatherResult').innerHTML = daysHtml;
         }
         
-        // Загружаем погоду при старте, если есть город в URL
         window.onload = function() {
-            const city = document.getElementById('cityInput').value;
-            if (city) getWeather();
+            // Можно загрузить погоду для Москвы по умолчанию
+            document.getElementById('cityInput').value = 'Москва';
+            getWeather();
         }
     </script>
 </body>
@@ -433,8 +523,7 @@ HTML_TEMPLATE = """
 def index():
     return render_template_string(HTML_TEMPLATE, 
                                   ai_name=AI_NAME, 
-                                  creator_name=CREATOR_NAME,
-                                  last_city="")
+                                  creator_name=CREATOR_NAME)
 
 @app.route('/weather', methods=['POST'])
 def weather():
@@ -454,6 +543,17 @@ def weather():
         if not w:
             return jsonify({'error': 'Не удалось получить погоду'})
         press_mm = round(w['press'] * 0.75006) if w['press'] else 0
+        condition = code2text(w['code'])
+        
+        # Получаем рекомендации по одежде
+        clothing = get_clothing_recommendation(
+            temp=w['temp'],
+            feels=w['feels'],
+            wind=w['wind'],
+            precip=w['precip'],
+            condition_text=condition
+        )
+        
         return jsonify({
             'city': city.title(),
             'temp': w['temp'],
@@ -463,7 +563,8 @@ def weather():
             'clouds': w['clouds'],
             'precip': w['precip'],
             'pressure': press_mm,
-            'condition': code2text(w['code'])
+            'condition': condition,
+            'clothing': clothing
         })
     else:
         week = get_weekly(lat, lon)
@@ -486,7 +587,7 @@ def weather():
 
 if __name__ == '__main__':
     print("\n" + "="*60)
-    print(f"🌤 {AI_NAME} — ВЕБ-СЕРВЕР ЗАПУЩЕН 🌤")
+    print(f"🌤 {AI_NAME} — ВЕБ-СЕРВЕР С РЕКОМЕНДАЦИЯМИ ПО ОДЕЖДЕ 🌤")
     print("="*60)
     print("\n📱 ДЛЯ ДОСТУПА С ТЕЛЕФОНА (в одной Wi-Fi сети):")
     print("\nШАГ 1: Узнайте IP вашего компьютера:")
@@ -495,7 +596,6 @@ if __name__ == '__main__':
     print("\nШАГ 2: На телефоне откройте браузер и введите:")
     print(f"   http://ВАШ_IP:5000")
     print("\nШАГ 3 (альтернатива — на этом же компьютере):")
-    print("   Откройте браузер и перейдите по адресу:")
     print("   http://localhost:5000")
     print("\n" + "="*60)
     print("Нажмите Ctrl+C для остановки сервера\n")
