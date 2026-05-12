@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
-CREATOR_NAME = "Ваше Имя"
+CREATOR_NAME = "Соловьев Дмитрий Владимирович"
 AI_NAME = "WeatherAI"
 
 def get_coords(city):
@@ -76,7 +76,6 @@ def get_weekly(lat, lon):
         return None
 
 def get_hourly_48h(lat, lon):
-    """Почасовой прогноз на 48 часов (2 дня)"""
     url = "https://api.open-meteo.com/v1/forecast"
     params = {
         "latitude": lat, "longitude": lon,
@@ -162,23 +161,44 @@ def get_clothing_recommendation(temp, feels, wind, precip, condition_text):
     short = "Очень холодно ❄️" if temp <= 0 else "Прохладно 🧥" if temp <= 10 else "Тепло ☀️" if temp <= 20 else "Жарко 🩳"
     return {"short": short, "full": " • ".join(recommendations) if recommendations else "Одевайся по погоде."}
 
+# ========== HTML с анимациями ==========
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-    <title>{{ ai_name }} — Погода + Почасовой прогноз</title>
+    <title>{{ ai_name }} — Живая погода</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             padding: 20px;
+            transition: background 0.5s ease;
         }
+        /* Фоны в зависимости от погоды (устанавливаются JS) */
+        body.sunny { background: linear-gradient(135deg, #f5af19 0%, #f12711 100%); }
+        body.cloudy { background: linear-gradient(135deg, #757f9a 0%, #d7dde8 100%); }
+        body.rainy { background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%); }
+        body.thunder { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); animation: pulse 0.3s infinite alternate; }
+        body.snowy { background: linear-gradient(135deg, #e6f0fa 0%, #b0c4de 100%); }
+        body.foggy { background: linear-gradient(135deg, #bdc3c7 0%, #2c3e50 100%); }
+        
+        @keyframes pulse {
+            0% { background: #1a1a2e; }
+            100% { background: #2d2d44; }
+        }
+        
         .container { max-width: 650px; margin: 0 auto; }
-        .card { background: white; border-radius: 25px; padding: 24px; margin-bottom: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); }
+        .card {
+            background: rgba(255,255,255,0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 25px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }
         h1 { font-size: 24px; text-align: center; margin-bottom: 8px; }
         .subtitle { text-align: center; color: #666; font-size: 14px; margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 16px; }
         .search-box { display: flex; gap: 12px; margin-bottom: 20px; }
@@ -187,16 +207,49 @@ HTML_TEMPLATE = """
         button { padding: 14px 24px; background: #667eea; color: white; border: none; border-radius: 30px; font-weight: 600; cursor: pointer; transition: transform 0.2s; }
         button:active { transform: scale(0.96); }
         .period-buttons { display: flex; gap: 12px; margin-bottom: 20px; }
-        .period-btn { flex: 1; padding: 12px; background: #f0f0f0; color: #666; border: none; border-radius: 30px; font-size: 14px; cursor: pointer; }
-        .period-btn.active { background: #667eea; color: white; }
-        .weather-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 25px; padding: 24px; text-align: center; }
+        .period-btn { flex: 1; padding: 12px; background: rgba(0,0,0,0.1); color: #333; border: none; border-radius: 30px; font-size: 14px; cursor: pointer; transition: all 0.2s; backdrop-filter: blur(4px);}
+        .period-btn.active { background: #667eea; color: white; box-shadow: 0 4px 15px rgba(102,126,234,0.4); }
+        .weather-card {
+            background: rgba(255,255,255,0.9);
+            border-radius: 25px;
+            padding: 24px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        /* Анимации погоды */
+        .weather-icon {
+            font-size: 80px;
+            margin-bottom: 16px;
+            animation: weatherFloat 2s ease-in-out infinite;
+        }
+        @keyframes weatherFloat {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+        }
         .temp { font-size: 64px; font-weight: bold; margin: 16px 0; }
-        .clothing-card { background: #fff8e7; border-left: 5px solid #ff9800; border-radius: 16px; padding: 16px; margin-top: 20px; text-align: left; }
+        .feels { font-size: 16px; opacity: 0.8; }
+        .clothing-card {
+            background: #fff8e7;
+            border-left: 5px solid #ff9800;
+            border-radius: 16px;
+            padding: 16px;
+            margin-top: 20px;
+            text-align: left;
+        }
         .clothing-title { font-weight: bold; font-size: 18px; display: flex; align-items: center; gap: 8px; }
         .day-group { margin-top: 20px; }
-        .day-header { font-size: 18px; font-weight: bold; background: rgba(255,255,255,0.25); padding: 8px 12px; border-radius: 30px; display: inline-block; margin-bottom: 12px; }
+        .day-header { font-size: 18px; font-weight: bold; background: rgba(102,126,234,0.2); padding: 8px 12px; border-radius: 30px; display: inline-block; margin-bottom: 12px; }
         .hourly-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px,1fr)); gap: 12px; }
-        .hour-item { background: rgba(255,255,255,0.15); border-radius: 16px; padding: 10px; text-align: center; backdrop-filter: blur(4px); }
+        .hour-item {
+            background: rgba(102,126,234,0.15);
+            border-radius: 16px;
+            padding: 10px;
+            text-align: center;
+            backdrop-filter: blur(4px);
+            transition: transform 0.2s;
+        }
+        .hour-item:hover { transform: scale(1.02); }
         .hour-time { font-weight: bold; font-size: 15px; margin-bottom: 4px; }
         .hour-temp { font-size: 20px; font-weight: bold; }
         .hour-desc { font-size: 11px; opacity: 0.9; margin-top: 4px; }
@@ -205,15 +258,69 @@ HTML_TEMPLATE = """
         .error { background: #fee; color: #c33; padding: 16px; border-radius: 16px; text-align: center; margin-top: 16px; }
         .spinner { width: 40px; height: 40px; border: 4px solid #e0e0e0; border-top-color: #667eea; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto; }
         @keyframes spin { to { transform: rotate(360deg); } }
-        footer { text-align: center; color: rgba(255,255,255,0.7); font-size: 12px; padding: 20px; }
+        footer { text-align: center; color: rgba(255,255,255,0.9); font-size: 12px; padding: 20px; text-shadow: 0 1px 2px rgba(0,0,0,0.2); }
         .note { font-size: 11px; margin-top: 12px; opacity: 0.7; text-align: center; }
+        
+        /* Капли дождя */
+        .rain {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+        }
+        .drop {
+            position: absolute;
+            bottom: 100%;
+            width: 2px;
+            height: 60px;
+            background: linear-gradient(transparent, #fff);
+            animation: fall linear infinite;
+        }
+        @keyframes fall {
+            to { transform: translateY(100vh); }
+        }
+        /* Снежинки */
+        .snowflake {
+            position: fixed;
+            top: -10px;
+            color: white;
+            font-size: 1.5em;
+            user-select: none;
+            pointer-events: none;
+            animation: fallSnow linear infinite;
+            text-shadow: 0 0 5px rgba(0,0,0,0.3);
+        }
+        @keyframes fallSnow {
+            to { transform: translateY(100vh); }
+        }
+        /* Молния */
+        .lightning {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            background: rgba(255,255,255,0.8);
+            animation: flash 0.1s ease-out infinite;
+            z-index: 10;
+        }
+        @keyframes flash {
+            0%, 100% { opacity: 0; }
+            50% { opacity: 1; }
+        }
     </style>
 </head>
 <body>
-<div class="container">
+<div class="rain" id="rainContainer"></div>
+<div id="snowContainer"></div>
+<div class="container" style="position: relative; z-index: 1;">
     <div class="card">
         <h1>🌤 {{ ai_name }}</h1>
-        <div class="subtitle">Погода + одежда + почасовой прогноз на 2 дня</div>
+        <div class="subtitle">Анимированная живая погода 🌈</div>
         <div class="search-box">
             <input type="text" id="cityInput" placeholder="Например: Алатырь, Москва" value="Москва">
             <button onclick="getWeather()">🔍</button>
@@ -226,10 +333,103 @@ HTML_TEMPLATE = """
         <div id="loader" class="loader"><div class="spinner"></div><p>Загрузка...</p></div>
         <div id="weatherResult"></div>
     </div>
-    <footer>Создатель: {{ creator_name }}<br>Данные: Open-Meteo API</footer>
+    <footer>Создатель: {{ creator_name }}<br>Анимированная погода с эффектами 🌟</footer>
 </div>
+
 <script>
     let currentPeriod = 'today';
+    let rainInterval = null;
+    let snowInterval = null;
+    let lightningInterval = null;
+    
+    function clearEffects() {
+        if (rainInterval) clearInterval(rainInterval);
+        if (snowInterval) clearInterval(snowInterval);
+        if (lightningInterval) clearInterval(lightningInterval);
+        const rainDiv = document.getElementById('rainContainer');
+        const snowDiv = document.getElementById('snowContainer');
+        if (rainDiv) rainDiv.innerHTML = '';
+        if (snowDiv) snowDiv.innerHTML = '';
+        // убираем молнию
+        const existingLightning = document.querySelector('.lightning');
+        if (existingLightning) existingLightning.remove();
+    }
+    
+    function startRain() {
+        clearEffects();
+        const container = document.getElementById('rainContainer');
+        for (let i = 0; i < 80; i++) {
+            const drop = document.createElement('div');
+            drop.className = 'drop';
+            drop.style.left = Math.random() * 100 + '%';
+            drop.style.animationDuration = Math.random() * 1 + 0.5 + 's';
+            drop.style.animationDelay = Math.random() * 2 + 's';
+            drop.style.opacity = Math.random() * 0.5 + 0.3;
+            container.appendChild(drop);
+        }
+    }
+    
+    function startSnow() {
+        clearEffects();
+        const container = document.getElementById('snowContainer');
+        for (let i = 0; i < 60; i++) {
+            const flake = document.createElement('div');
+            flake.className = 'snowflake';
+            flake.innerHTML = '❄️';
+            flake.style.left = Math.random() * 100 + '%';
+            flake.style.animationDuration = Math.random() * 5 + 3 + 's';
+            flake.style.animationDelay = Math.random() * 5 + 's';
+            flake.style.fontSize = (Math.random() * 20 + 10) + 'px';
+            container.appendChild(flake);
+        }
+    }
+    
+    function startThunder() {
+        clearEffects();
+        const body = document.body;
+        lightningInterval = setInterval(() => {
+            const lightning = document.createElement('div');
+            lightning.className = 'lightning';
+            document.body.appendChild(lightning);
+            setTimeout(() => {
+                if (lightning) lightning.remove();
+            }, 100);
+        }, Math.random() * 3000 + 2000);
+    }
+    
+    function setWeatherBackground(code) {
+        const body = document.body;
+        body.className = '';
+        if (code === 0) body.classList.add('sunny');
+        else if (code >= 1 && code <= 3) body.classList.add('cloudy');
+        else if ((code >= 51 && code <= 55) || (code >= 61 && code <= 65) || (code >= 80 && code <= 82)) {
+            body.classList.add('rainy');
+            startRain();
+        }
+        else if (code >= 95) {
+            body.classList.add('thunder');
+            startThunder();
+            startRain();
+        }
+        else if (code >= 71 && code <= 77) {
+            body.classList.add('snowy');
+            startSnow();
+        }
+        else if (code === 45 || code === 48) body.classList.add('foggy');
+        else body.classList.add('cloudy');
+    }
+    
+    function getWeatherIcon(code) {
+        if (code === 0) return "☀️✨";
+        if (code >= 1 && code <= 3) return "⛅🌤️";
+        if (code >= 51 && code <= 55) return "🌦️💧";
+        if ((code >= 61 && code <= 65) || (code >= 80 && code <= 82)) return "🌧️☔";
+        if (code >= 71 && code <= 77) return "❄️🌨️";
+        if (code >= 95) return "⚡⛈️🔥";
+        if (code === 45 || code === 48) return "🌫️😶‍🌫️";
+        return "🌥️";
+    }
+    
     function setPeriod(period) {
         currentPeriod = period;
         document.getElementById('todayBtn').classList.remove('active');
@@ -238,6 +438,7 @@ HTML_TEMPLATE = """
         document.getElementById(period + 'Btn').classList.add('active');
         getWeather();
     }
+    
     async function getWeather() {
         const city = document.getElementById('cityInput').value.trim();
         if (!city) { alert('Введите город'); return; }
@@ -252,12 +453,15 @@ HTML_TEMPLATE = """
             const data = await res.json();
             if (data.error) {
                 document.getElementById('weatherResult').innerHTML = `<div class="error">❌ ${data.error}</div>`;
+                clearEffects();
             } else if (currentPeriod === 'today') {
                 displayCurrent(data);
             } else if (currentPeriod === 'hourly') {
                 displayHourly(data);
+                clearEffects();
             } else {
                 displayWeekly(data);
+                clearEffects();
             }
         } catch(e) {
             document.getElementById('weatherResult').innerHTML = '<div class="error">❌ Ошибка соединения</div>';
@@ -265,7 +469,10 @@ HTML_TEMPLATE = """
             document.getElementById('loader').style.display = 'none';
         }
     }
+    
     function displayCurrent(data) {
+        setWeatherBackground(data.code);
+        const weatherIcon = getWeatherIcon(data.code);
         const clothingHtml = data.clothing ? `
             <div class="clothing-card">
                 <div class="clothing-title">👗 ${data.clothing.short}</div>
@@ -273,7 +480,8 @@ HTML_TEMPLATE = """
             </div>` : '';
         const html = `
             <div class="weather-card">
-                <div class="city-name">${data.city}</div>
+                <div class="weather-icon">${weatherIcon}</div>
+                <div class="city-name" style="font-size:28px; font-weight:bold;">${data.city}</div>
                 <div class="temp">${data.temp}°C</div>
                 <div class="feels">Ощущается ${data.feels}°C</div>
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:20px;">
@@ -287,49 +495,40 @@ HTML_TEMPLATE = """
             </div>${clothingHtml}`;
         document.getElementById('weatherResult').innerHTML = html;
     }
+    
     function displayHourly(data) {
+        clearEffects();
         let groups = {};
-        for (let h of data) {
-            const day = h.day;
-            if (!groups[day]) groups[day] = [];
-            groups[day].push(h);
-        }
-        let html = `<div class="weather-card"><div style="font-size:18px; margin-bottom:16px;">⏰ ПОЧАСОВОЙ ПРОГНОЗ НА 2 ДНЯ (48 часов)</div>`;
+        for (let h of data) { if (!groups[h.day]) groups[h.day] = []; groups[h.day].push(h); }
+        let html = `<div class="weather-card"><div style="font-size:18px; margin-bottom:16px;">⏰ ПОЧАСОВОЙ ПРОГНОЗ НА 2 ДНЯ</div>`;
         for (let day in groups) {
             html += `<div class="day-group"><div class="day-header">📅 ${day}</div><div class="hourly-grid">`;
             for (let h of groups[day]) {
                 const conditionText = getConditionText(h.code);
-                html += `
-                    <div class="hour-item">
-                        <div class="hour-time">${h.time}</div>
-                        <div class="hour-temp">${h.temp}°C</div>
-                        <div class="hour-desc">${conditionText}</div>
-                        <div class="hour-desc">💨 ${h.wind} км/ч</div>
-                        <div class="hour-desc">🌧 ${h.precip} мм</div>
-                    </div>`;
+                html += `<div class="hour-item"><div class="hour-time">${h.time}</div><div class="hour-temp">${h.temp}°C</div><div class="hour-desc">${conditionText}</div><div class="hour-desc">💨 ${h.wind} км/ч</div><div class="hour-desc">🌧 ${h.precip} мм</div></div>`;
             }
             html += `</div></div>`;
         }
-        html += `<div class="note">📌 Данные обновляются каждый час. Время — местное.</div></div>`;
+        html += `<div class="note">📌 Данные обновляются каждый час</div></div>`;
         document.getElementById('weatherResult').innerHTML = html;
     }
+    
     function getConditionText(code) {
         if (code === 0) return "Ясно ☀️";
-        if (code >= 1 && code <= 3) return "Малооблачно ⛅";
-        if (code === 45 || code === 48) return "Туман 🌫️";
-        if (code >= 51 && code <= 55) return "Морось 🌦️";
+        if (code >= 1 && code <= 3) return "Облачно ⛅";
         if (code >= 61 && code <= 65) return "Дождь 🌧️";
-        if (code >= 71 && code <= 75) return "Снег 🌨️";
         if (code >= 95) return "Гроза ⛈️";
-        return "Облачно 🌥️";
+        if (code >= 71 && code <= 75) return "Снег 🌨️";
+        return "Пасмурно 🌥️";
     }
+    
     function displayWeekly(data) {
+        clearEffects();
         let rows = '';
-        for (let d of data) {
-            rows += `<div class="forecast-item"><span>${d.date}</span><span>${d.tmin}→${d.tmax}°C</span><span>${d.condition}</span><span>💨${d.wind}</span><span>🌧${d.precip}мм</span></div>`;
-        }
+        for (let d of data) rows += `<div class="forecast-item"><span>${d.date}</span><span>${d.tmin}→${d.tmax}°C</span><span>${d.condition}</span><span>💨${d.wind}</span><span>🌧${d.precip}мм</span></div>`;
         document.getElementById('weatherResult').innerHTML = `<div class="weather-card"><div style="font-size:20px;">📅 НЕДЕЛЯ</div>${rows}</div>`;
     }
+    
     window.onload = () => { getWeather(); };
 </script>
 </body>
@@ -351,12 +550,12 @@ def weather():
     
     lat, lon = get_coords(city)
     if lat is None:
-        return jsonify({'error': f'Город "{city}" не найден. Проверьте название.'})
+        return jsonify({'error': f'Город "{city}" не найден'})
     
     if period == 'today':
         w = get_current(lat, lon)
         if not w:
-            return jsonify({'error': 'Не удалось получить текущую погоду'})
+            return jsonify({'error': 'Ошибка получения погоды'})
         press_mm = round(w['press'] * 0.75006) if w['press'] else 0
         condition = code2text(w['code'])
         clothing = get_clothing_recommendation(w['temp'], w['feels'], w['wind'], w['precip'], condition)
@@ -370,36 +569,34 @@ def weather():
             'precip': w['precip'],
             'pressure': press_mm,
             'condition': condition,
-            'clothing': clothing
+            'clothing': clothing,
+            'code': w['code']
         })
     elif period == 'hourly':
         hourly = get_hourly_48h(lat, lon)
-        if not hourly or len(hourly) == 0:
-            return jsonify({'error': 'Не удалось получить почасовой прогноз'})
+        if not hourly:
+            return jsonify({'error': 'Ошибка почасового прогноза'})
         return jsonify(hourly)
-    else:  # week
+    else:
         week = get_weekly(lat, lon)
         if not week:
-            return jsonify({'error': 'Не удалось получить прогноз на неделю'})
-        ru_days = ["ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ", "ВС"]
+            return jsonify({'error': 'Ошибка прогноза на неделю'})
+        ru_days = ["ПН","ВТ","СР","ЧТ","ПТ","СБ","ВС"]
         result = []
         for i, d in enumerate(week):
             dt = datetime.strptime(d['date'], "%Y-%m-%d")
             result.append({
                 'date': f"{dt.strftime('%d.%m')} ({ru_days[dt.weekday()]})",
-                'tmin': d['tmin'],
-                'tmax': d['tmax'],
+                'tmin': d['tmin'], 'tmax': d['tmax'],
                 'condition': code2text(d['code']),
-                'wind': d['wind'],
-                'precip': d['precip']
+                'wind': d['wind'], 'precip': d['precip']
             })
         return jsonify(result)
 
 if __name__ == '__main__':
     print("\n" + "="*60)
-    print("🌤 ПОГОДНЫЙ СЕРВЕР ЗАПУЩЕН 🌤")
+    print("🌤 АНИМИРОВАННЫЙ ПОГОДНЫЙ СЕРВЕР ЗАПУЩЕН 🌤")
     print("="*60)
-    print("\n📱 Локальный доступ: http://localhost:5000")
-    print("🌐 Для доступа с телефона: http://ВАШ_IP:5000")
-    print("\n" + "="*60)
+    print("\n📱 http://localhost:5000")
+    print("🌐 Для телефона: http://ВАШ_IP:5000\n")
     app.run(host='0.0.0.0', port=5000, debug=False)
