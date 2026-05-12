@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
-CREATOR_NAME = "Ваше Имя"
+CREATOR_NAME = "Соловьев Дмитрий Владимирович"
 AI_NAME = "WeatherAI"
 
 def get_coords(city):
