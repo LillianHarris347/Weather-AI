@@ -1,12 +1,12 @@
-ffrom flask import Flask, request, render_template_string, jsonify
+from flask import Flask, request, render_template_string, jsonify
 import requests
 import re
 from geopy.geocoders import Nominatim
-from datetime import datetime, timedelta
+from datetime import datetime
 
 app = Flask(__name__)
 
-CREATOR_NAME = "Соловьев Дмитрий Владимирович"
+CREATOR_NAME = "Ваше Имя"
 AI_NAME = "WeatherAI"
 
 def get_coords(city):
@@ -75,14 +75,13 @@ def get_weekly(lat, lon):
     except:
         return None
 
-# 🔥 ПОЧАСОВОЙ ПРОГНОЗ — 48 ЧАСОВ (2 дня) 🔥
 def get_hourly(lat, lon):
     url = "https://api.open-meteo.com/v1/forecast"
     params = {
         "latitude": lat, "longitude": lon,
         "hourly": "temperature_2m,weather_code,precipitation,wind_speed_10m",
         "timezone": "auto",
-        "forecast_days": 2      # 2 дня = 48 часов
+        "forecast_days": 1
     }
     try:
         r = requests.get(url, params=params, timeout=10)
@@ -94,33 +93,31 @@ def get_hourly(lat, lon):
         precip = hourly.get("precipitation", [])
         winds = hourly.get("wind_speed_10m", [])
         result = []
-        for i in range(min(48, len(times))):
+        for i in range(min(24, len(times))):
             dt = datetime.fromisoformat(times[i])
             result.append({
                 "time": dt.strftime("%H:00"),
-                "date_short": dt.strftime("%d.%m"),
                 "temp": temps[i],
                 "code": codes[i],
                 "precip": precip[i],
                 "wind": winds[i]
             })
         return result
-    except Exception as e:
-        print("Hourly error:", e)
+    except:
         return None
 
 def code2text(code):
-    if code == 0: return "☀️ Ясно"
-    if 1 <= code <= 3: return "⛅ Малооблачно"
-    if code in (45, 48): return "🌫️ Туман"
-    if 51 <= code <= 55: return "🌦️ Морось"
-    if 61 <= code <= 65: return "🌧️ Дождь"
-    if 66 <= code <= 67: return "❄️🌧️ Ледяной дождь"
-    if 71 <= code <= 75: return "🌨️ Снег"
-    if 80 <= code <= 82: return "☔ Ливень"
-    if 85 <= code <= 86: return "❄️☔ Снегопад"
-    if code >= 95: return "⛈️ Гроза"
-    return "🌥️ Облачно"
+    if code == 0: return "Ясно ☀️"
+    if 1 <= code <= 3: return "Малооблачно ⛅"
+    if code in (45, 48): return "Туман 🌫️"
+    if 51 <= code <= 55: return "Морось 🌦️"
+    if 61 <= code <= 65: return "Дождь 🌧️"
+    if 66 <= code <= 67: return "Ледяной дождь ❄️🌧️"
+    if 71 <= code <= 75: return "Снег 🌨️"
+    if 80 <= code <= 82: return "Ливень ☔"
+    if 85 <= code <= 86: return "Снегопад ❄️☔"
+    if code >= 95: return "Гроза ⛈️"
+    return "Облачно 🌥️"
 
 def get_clothing_recommendation(temp, feels, wind, precip, condition_text):
     recommendations = []
@@ -137,7 +134,7 @@ def get_clothing_recommendation(temp, feels, wind, precip, condition_text):
     elif temp <= 10:
         recommendations.append("🧥 Свежо. Лёгкая куртка или ветровка.")
     elif temp <= 15:
-        recommendations.append("🧥 Прохладно. Кофта + куртка. Шапка не нужна.")
+        recommendations.append("🧥 Тепло? Кофта + куртка. Шапка не нужна.")
     elif temp <= 20:
         recommendations.append("👕 Тепло. Футболка и джинсы. На вечер — кофта.")
     elif temp <= 25:
@@ -150,17 +147,16 @@ def get_clothing_recommendation(temp, feels, wind, precip, condition_text):
         recommendations.append("🍃 Ветрено. Застегнись.")
     if precip > 5 or ("дождь" in condition_text.lower()):
         recommendations.append("☔ Осадки — возьми зонт.")
-    short = "❄️ Очень холодно" if temp <= 0 else "🧥 Прохладно" if temp <= 10 else "☀️ Тепло" if temp <= 20 else "🩳 Жарко"
-    return {"short": short, "full": " • ".join(recommendations) if recommendations else "👕 Одевайся по погоде."}
+    short = "Очень холодно ❄️" if temp <= 0 else "Прохладно 🧥" if temp <= 10 else "Тепло ☀️" if temp <= 20 else "Жарко 🩳"
+    return {"short": short, "full": " • ".join(recommendations) if recommendations else "Одевайся по погоде."}
 
-# HTML шаблон с QR, анимками и 48-часовым прогнозом
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-    <title>{{ ai_name }} — Погода + Одежда + 48 часов</title>
+    <title>{{ ai_name }} — Погода + QR‑код для другого телефона</title>
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -179,10 +175,10 @@ HTML_TEMPLATE = """
         input:focus { border-color: #667eea; }
         button { padding: 14px 24px; background: #667eea; color: white; border: none; border-radius: 30px; font-weight: 600; cursor: pointer; transition: transform 0.2s; }
         button:active { transform: scale(0.96); }
-        .share-btn { background: #4caf50; margin-bottom: 20px; width: 100%; }
         .period-buttons { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
         .period-btn { flex: 1; padding: 12px; background: #f0f0f0; color: #666; border: none; border-radius: 30px; font-size: 14px; cursor: pointer; }
         .period-btn.active { background: #667eea; color: white; }
+        .share-btn { background: #4caf50; margin-bottom: 20px; width: 100%; }
         .qr-container { text-align: center; margin-top: 20px; padding: 16px; background: #f9f9f9; border-radius: 20px; display: none; }
         .qr-container.show { display: block; }
         .qr-instruction { font-size: 14px; color: #555; margin-bottom: 16px; }
@@ -190,11 +186,10 @@ HTML_TEMPLATE = """
         .temp { font-size: 64px; font-weight: bold; margin: 16px 0; }
         .clothing-card { background: #fff8e7; border-left: 5px solid #ff9800; border-radius: 16px; padding: 16px; margin-top: 20px; text-align: left; }
         .clothing-title { font-weight: bold; font-size: 18px; display: flex; align-items: center; gap: 8px; }
-        .hourly-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px,1fr)); gap: 12px; margin-top: 20px; max-height: 500px; overflow-y: auto; }
+        .hourly-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px,1fr)); gap: 12px; margin-top: 20px; }
         .hour-item { background: rgba(255,255,255,0.2); border-radius: 16px; padding: 12px; text-align: center; backdrop-filter: blur(4px); }
         .hour-time { font-weight: bold; font-size: 16px; margin-bottom: 6px; }
         .hour-temp { font-size: 20px; font-weight: bold; }
-        .hour-desc { font-size: 12px; opacity: 0.9; margin-top: 4px; }
         .forecast-item { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #eee; }
         .loader { text-align: center; padding: 40px; display: none; }
         .error { background: #fee; color: #c33; padding: 16px; border-radius: 16px; text-align: center; margin-top: 16px; }
@@ -207,9 +202,10 @@ HTML_TEMPLATE = """
 <div class="container">
     <div class="card">
         <h1>🌤 {{ ai_name }}</h1>
-        <div class="subtitle">😎 Одеваемся по погоде • ⏰ 48 часов • 🌡 Анимки</div>
+        <div class="subtitle">Погода + одежда + почасовой прогноз</div>
 
-        <button class="share-btn" onclick="toggleQR()">📲 QR‑код для другого телефона</button>
+        <!-- Кнопка для показа QR‑кода -->
+        <button class="share-btn" onclick="toggleQR()">📲 Поделиться сайтом (QR‑код)</button>
         <div id="qrContainer" class="qr-container">
             <div class="qr-instruction">📱 Поднесите второй телефон к экрану или отсканируйте камерой</div>
             <div id="qrcode"></div>
@@ -217,18 +213,18 @@ HTML_TEMPLATE = """
         </div>
 
         <div class="search-box">
-            <input type="text" id="cityInput" placeholder="🌆 Алатырь, Москва, Сочи..." value="Алатырь">
+            <input type="text" id="cityInput" placeholder="Например: Алатырь, Москва" value="Алатырь">
             <button onclick="getWeather()">🔍</button>
         </div>
         <div class="period-buttons">
-            <button class="period-btn" id="todayBtn" onclick="setPeriod('today')">🌡 СЕЙЧАС</button>
-            <button class="period-btn" id="hourlyBtn" onclick="setPeriod('hourly')">⏰ 48 ЧАСОВ</button>
+            <button class="period-btn" id="todayBtn" onclick="setPeriod('today')">🌡 СЕГОДНЯ</button>
+            <button class="period-btn" id="hourlyBtn" onclick="setPeriod('hourly')">⏰ ПОЧАСОВО</button>
             <button class="period-btn" id="weekBtn" onclick="setPeriod('week')">📅 НЕДЕЛЯ</button>
         </div>
         <div id="loader" class="loader"><div class="spinner"></div><p>Загрузка...</p></div>
         <div id="weatherResult"></div>
     </div>
-    <footer>🧑‍💻 Создатель: {{ creator_name }}<br>🌦 Данные: Open‑Meteo (48ч)</footer>
+    <footer>Создатель: {{ creator_name }}<br>Данные: Open-Meteo API</footer>
 </div>
 <script>
     let currentPeriod = 'today';
@@ -258,9 +254,9 @@ HTML_TEMPLATE = """
 
     function setPeriod(period) {
         currentPeriod = period;
-        ['todayBtn', 'hourlyBtn', 'weekBtn'].forEach(id => {
-            document.getElementById(id).classList.remove('active');
-        });
+        document.getElementById('todayBtn').classList.remove('active');
+        document.getElementById('hourlyBtn').classList.remove('active');
+        document.getElementById('weekBtn').classList.remove('active');
         document.getElementById(period + 'Btn').classList.add('active');
         getWeather();
     }
@@ -301,9 +297,9 @@ HTML_TEMPLATE = """
             </div>` : '';
         const html = `
             <div class="weather-card">
-                <div class="city-name">📍 ${data.city}</div>
+                <div class="city-name">${data.city}</div>
                 <div class="temp">${data.temp}°C</div>
-                <div class="feels">Ощущается как ${data.feels}°C</div>
+                <div class="feels">Ощущается ${data.feels}°C</div>
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:20px;">
                     <div>💧 Влажность ${data.humidity}%</div>
                     <div>💨 Ветер ${data.wind} км/ч</div>
@@ -318,12 +314,7 @@ HTML_TEMPLATE = """
 
     function displayHourly(data) {
         let items = '';
-        let lastDate = '';
         for (let h of data) {
-            if (h.date_short !== lastDate) {
-                items += `<div style="grid-column:1/-1; margin-top:8px; font-weight:bold; background:rgba(0,0,0,0.3); padding:6px; border-radius:20px;">📅 ${h.date_short}</div>`;
-                lastDate = h.date_short;
-            }
             items += `
                 <div class="hour-item">
                     <div class="hour-time">${h.time}</div>
@@ -333,7 +324,7 @@ HTML_TEMPLATE = """
                     <div class="hour-desc">🌧 ${h.precip} мм</div>
                 </div>`;
         }
-        const html = `<div class="weather-card"><div style="font-size:20px; margin-bottom:12px;">⏰ ПОЧАСОВОЙ ПРОГНОЗ — 48 ЧАСОВ</div><div class="hourly-grid">${items}</div></div>`;
+        const html = `<div class="weather-card"><div style="font-size:20px; margin-bottom:12px;">⏰ ПОЧАСОВОЙ ПРОГНОЗ (24 часа)</div><div class="hourly-grid">${items}</div></div>`;
         document.getElementById('weatherResult').innerHTML = html;
     }
 
@@ -382,7 +373,7 @@ def weather():
     elif period == 'hourly':
         hourly = get_hourly(lat, lon)
         if not hourly:
-            return jsonify({'error': 'Не удалось получить почасовой прогноз на 48 часов'})
+            return jsonify({'error': 'Не удалось получить почасовой прогноз'})
         for h in hourly:
             h['condition'] = code2text(h['code'])
         return jsonify(hourly)
@@ -403,11 +394,5 @@ def weather():
         return jsonify(result)
 
 if __name__ == '__main__':
-    print("\n" + "="*60)
-    print("🌤 ПОГОДНЫЙ ПОМОЩНИК — с QR, анимками и 48 часами")
-    print("="*60)
-    print("📍 Открой в браузере: http://localhost:5000")
-    print("📱 На телефоне нажми зелёную кнопку — появится QR‑код")
-    print("   Второй телефон наводит камеру на QR и заходит на сайт")
-    print("="*60)
+    print("\n🌤 СЕРВЕР ЗАПУЩЕН → http://localhost:5000")
     app.run(host='0.0.0.0', port=5000, debug=False)
