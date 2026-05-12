@@ -2,11 +2,11 @@ from flask import Flask, request, render_template_string, jsonify
 import requests
 import re
 from geopy.geocoders import Nominatim
-from datetime import datetime
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
-CREATOR_NAME = "Соловьев Дмитрий Владимирович"
+CREATOR_NAME = "Ваше Имя"
 AI_NAME = "WeatherAI"
 
 def get_coords(city):
@@ -75,13 +75,14 @@ def get_weekly(lat, lon):
     except:
         return None
 
-def get_hourly(lat, lon):
+# === ПОЧАСОВОЙ ПРОГНОЗ НА 48 ЧАСОВ (2 ДНЯ) ===
+def get_hourly_48h(lat, lon):
     url = "https://api.open-meteo.com/v1/forecast"
     params = {
         "latitude": lat, "longitude": lon,
         "hourly": "temperature_2m,weather_code,precipitation,wind_speed_10m",
         "timezone": "auto",
-        "forecast_days": 1
+        "forecast_days": 2        # именно 2 дня = 48 часов
     }
     try:
         r = requests.get(url, params=params, timeout=10)
@@ -93,17 +94,24 @@ def get_hourly(lat, lon):
         precip = hourly.get("precipitation", [])
         winds = hourly.get("wind_speed_10m", [])
         result = []
-        for i in range(min(24, len(times))):
+        # Берём до 48 часов, если хватает данных
+        max_hours = min(48, len(times))
+        for i in range(max_hours):
             dt = datetime.fromisoformat(times[i])
+            # Добавляем день, если это завтра (для наглядности)
+            day_label = ""
+            if i >= 24:
+                day_label = " (завтра)"
             result.append({
-                "time": dt.strftime("%H:00"),
+                "time": f"{dt.strftime('%d.%m %H:00')}{day_label}",
                 "temp": temps[i],
                 "code": codes[i],
                 "precip": precip[i],
                 "wind": winds[i]
             })
         return result
-    except:
+    except Exception as e:
+        print("Hourly 48h error:", e)
         return None
 
 def code2text(code):
@@ -150,24 +158,32 @@ def get_clothing_recommendation(temp, feels, wind, precip, condition_text):
     short = "Очень холодно ❄️" if temp <= 0 else "Прохладно 🧥" if temp <= 10 else "Тепло ☀️" if temp <= 20 else "Жарко 🩳"
     return {"short": short, "full": " • ".join(recommendations) if recommendations else "Одевайся по погоде."}
 
+# === HTML С АНИМИРОВАННЫМ ФОНОМ ===
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-    <title>{{ ai_name }} — Погода + QR‑код для другого телефона</title>
+    <title>{{ ai_name }} — Анимированный фон + 48ч прогноз</title>
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             padding: 20px;
+            background: linear-gradient(135deg, #1a2a6c, #b21f1f, #fdbb4d);
+            background-size: 400% 400%;
+            animation: gradientShift 12s ease infinite;
+        }
+        @keyframes gradientShift {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
         }
         .container { max-width: 600px; margin: 0 auto; }
-        .card { background: white; border-radius: 25px; padding: 24px; margin-bottom: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); }
+        .card { background: rgba(255,255,255,0.95); border-radius: 25px; padding: 24px; margin-bottom: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); backdrop-filter: blur(2px); }
         h1 { font-size: 24px; text-align: center; margin-bottom: 8px; }
         .subtitle { text-align: center; color: #666; font-size: 14px; margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 16px; }
         .search-box { display: flex; gap: 12px; margin-bottom: 20px; }
@@ -186,25 +202,24 @@ HTML_TEMPLATE = """
         .temp { font-size: 64px; font-weight: bold; margin: 16px 0; }
         .clothing-card { background: #fff8e7; border-left: 5px solid #ff9800; border-radius: 16px; padding: 16px; margin-top: 20px; text-align: left; }
         .clothing-title { font-weight: bold; font-size: 18px; display: flex; align-items: center; gap: 8px; }
-        .hourly-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px,1fr)); gap: 12px; margin-top: 20px; }
+        .hourly-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px,1fr)); gap: 12px; margin-top: 20px; max-height: 500px; overflow-y: auto; }
         .hour-item { background: rgba(255,255,255,0.2); border-radius: 16px; padding: 12px; text-align: center; backdrop-filter: blur(4px); }
-        .hour-time { font-weight: bold; font-size: 16px; margin-bottom: 6px; }
+        .hour-time { font-weight: bold; font-size: 14px; margin-bottom: 6px; }
         .hour-temp { font-size: 20px; font-weight: bold; }
         .forecast-item { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #eee; }
         .loader { text-align: center; padding: 40px; display: none; }
         .error { background: #fee; color: #c33; padding: 16px; border-radius: 16px; text-align: center; margin-top: 16px; }
         .spinner { width: 40px; height: 40px; border: 4px solid #e0e0e0; border-top-color: #667eea; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto; }
         @keyframes spin { to { transform: rotate(360deg); } }
-        footer { text-align: center; color: rgba(255,255,255,0.7); font-size: 12px; padding: 20px; }
+        footer { text-align: center; color: rgba(0,0,0,0.6); font-size: 12px; padding: 20px; background: rgba(255,255,255,0.5); border-radius: 20px; margin-top: 20px; }
     </style>
 </head>
 <body>
 <div class="container">
     <div class="card">
         <h1>🌤 {{ ai_name }}</h1>
-        <div class="subtitle">Погода + одежда + почасовой прогноз</div>
+        <div class="subtitle">Погода + одежда + 48‑часовой прогноз</div>
 
-        <!-- Кнопка для показа QR‑кода -->
         <button class="share-btn" onclick="toggleQR()">📲 Поделиться сайтом (QR‑код)</button>
         <div id="qrContainer" class="qr-container">
             <div class="qr-instruction">📱 Поднесите второй телефон к экрану или отсканируйте камерой</div>
@@ -218,13 +233,13 @@ HTML_TEMPLATE = """
         </div>
         <div class="period-buttons">
             <button class="period-btn" id="todayBtn" onclick="setPeriod('today')">🌡 СЕГОДНЯ</button>
-            <button class="period-btn" id="hourlyBtn" onclick="setPeriod('hourly')">⏰ ПОЧАСОВО</button>
+            <button class="period-btn" id="hourlyBtn" onclick="setPeriod('hourly')">⏰ 48 ЧАСОВ</button>
             <button class="period-btn" id="weekBtn" onclick="setPeriod('week')">📅 НЕДЕЛЯ</button>
         </div>
         <div id="loader" class="loader"><div class="spinner"></div><p>Загрузка...</p></div>
         <div id="weatherResult"></div>
     </div>
-    <footer>Создатель: {{ creator_name }}<br>Данные: Open-Meteo API</footer>
+    <footer>Создатель: {{ creator_name }}<br>Данные: Open-Meteo API (48ч прогноз)</footer>
 </div>
 <script>
     let currentPeriod = 'today';
@@ -324,7 +339,7 @@ HTML_TEMPLATE = """
                     <div class="hour-desc">🌧 ${h.precip} мм</div>
                 </div>`;
         }
-        const html = `<div class="weather-card"><div style="font-size:20px; margin-bottom:12px;">⏰ ПОЧАСОВОЙ ПРОГНОЗ (24 часа)</div><div class="hourly-grid">${items}</div></div>`;
+        const html = `<div class="weather-card"><div style="font-size:20px; margin-bottom:12px;">⏰ ПОЧАСОВОЙ ПРОГНОЗ (48 часов)</div><div class="hourly-grid">${items}</div></div>`;
         document.getElementById('weatherResult').innerHTML = html;
     }
 
@@ -371,13 +386,13 @@ def weather():
             'pressure': press_mm, 'condition': condition, 'clothing': clothing
         })
     elif period == 'hourly':
-        hourly = get_hourly(lat, lon)
+        hourly = get_hourly_48h(lat, lon)
         if not hourly:
-            return jsonify({'error': 'Не удалось получить почасовой прогноз'})
+            return jsonify({'error': 'Не удалось получить 48‑часовой прогноз'})
         for h in hourly:
             h['condition'] = code2text(h['code'])
         return jsonify(hourly)
-    else:
+    else:  # week
         week = get_weekly(lat, lon)
         if not week:
             return jsonify({'error': 'Ошибка прогноза на неделю'})
@@ -395,4 +410,6 @@ def weather():
 
 if __name__ == '__main__':
     print("\n🌤 СЕРВЕР ЗАПУЩЕН → http://localhost:5000")
+    print("🎨 Анимированный градиентный фон плавно меняет цвета.")
+    print("⏰ Почасовой прогноз теперь на 48 часов.")
     app.run(host='0.0.0.0', port=5000, debug=False)
