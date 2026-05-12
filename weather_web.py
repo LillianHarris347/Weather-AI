@@ -7,7 +7,7 @@ from datetime import datetime
 app = Flask(__name__)
 
 # ==================== НАСТРОЙКИ ====================
-CREATOR_NAME = "Ваше Имя"
+CREATOR_NAME = "Соловьев Дмитрий Владимирович"
 AI_NAME = "WeatherAI"
 
 # ==================== ГЕОКОДИНГ ====================
