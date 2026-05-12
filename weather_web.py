@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
-CREATOR_NAME = "Ваше Имя"
+CREATOR_NAME = "Соловьев Дмитрий Владимирович"
 AI_NAME = "WeatherAI"
 
 def get_coords(city):
@@ -75,14 +75,15 @@ def get_weekly(lat, lon):
     except:
         return None
 
-# === ПОЧАСОВОЙ ПРОГНОЗ НА 2 ДНЯ (48 часов) ===
-def get_hourly_48h(lat, lon):
+# === НОВАЯ ФУНКЦИЯ: ПОЧАСОВОЙ ПРОГНОЗ НА 24 ЧАСА ===
+def get_hourly(lat, lon):
     url = "https://api.open-meteo.com/v1/forecast"
     params = {
         "latitude": lat, "longitude": lon,
         "hourly": ["temperature_2m", "weather_code", "precipitation", "wind_speed_10m"],
         "timezone": "auto",
-        "forecast_days": 2      # ← 2 дня = 48 часов
+        "forecast_days": 1,       # только сегодня
+        "hourly": "temperature_2m,weather_code,precipitation,wind_speed_10m"
     }
     try:
         r = requests.get(url, params=params, timeout=10)
@@ -95,30 +96,20 @@ def get_hourly_48h(lat, lon):
         winds = hourly.get("wind_speed_10m", [])
         
         result = []
-        for i in range(len(times)):  # до 48 записей
+        # Берём первые 24 часа (или сколько есть)
+        for i in range(min(24, len(times))):
             dt = datetime.fromisoformat(times[i])
-            # Определяем, сегодня это или завтра
-            now = datetime.now()
-            if dt.date() == now.date():
-                day_label = "СЕГОДНЯ"
-            elif dt.date() == now.date() + timedelta(days=1):
-                day_label = "ЗАВТРА"
-            else:
-                day_label = dt.strftime("%d.%m")
-            
             hour_str = dt.strftime("%H:00")
             result.append({
-                "day": day_label,
                 "time": hour_str,
-                "datetime": times[i],
                 "temp": temps[i],
                 "code": codes[i],
-                "precip": precip[i] if precip[i] is not None else 0,
+                "precip": precip[i],
                 "wind": winds[i]
             })
         return result
     except Exception as e:
-        print("Hourly 48h error:", e)
+        print("Hourly error:", e)
         return None
 
 def code2text(code):
@@ -134,6 +125,7 @@ def code2text(code):
     if code >= 95: return "Гроза ⛈️"
     return "Облачно 🌥️"
 
+# === РЕКОМЕНДАЦИИ ПО ОДЕЖДЕ ===
 def get_clothing_recommendation(temp, feels, wind, precip, condition_text):
     recommendations = []
     if temp <= -25:
@@ -165,14 +157,14 @@ def get_clothing_recommendation(temp, feels, wind, precip, condition_text):
     short = "Очень холодно ❄️" if temp <= 0 else "Прохладно 🧥" if temp <= 10 else "Тепло ☀️" if temp <= 20 else "Жарко 🩳"
     return {"short": short, "full": " • ".join(recommendations) if recommendations else "Одевайся по погоде."}
 
-# === HTML-шаблон (с почасовым на 2 дня) ===
+# === HTML-шаблон с тремя режимами ===
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-    <title>{{ ai_name }} — Почасовой прогноз на 2 дня</title>
+    <title>{{ ai_name }} — Почасовой прогноз + Одежда</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -181,7 +173,7 @@ HTML_TEMPLATE = """
             min-height: 100vh;
             padding: 20px;
         }
-        .container { max-width: 650px; margin: 0 auto; }
+        .container { max-width: 600px; margin: 0 auto; }
         .card { background: white; border-radius: 25px; padding: 24px; margin-bottom: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); }
         h1 { font-size: 24px; text-align: center; margin-bottom: 8px; }
         .subtitle { text-align: center; color: #666; font-size: 14px; margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 16px; }
@@ -197,40 +189,37 @@ HTML_TEMPLATE = """
         .temp { font-size: 64px; font-weight: bold; margin: 16px 0; }
         .clothing-card { background: #fff8e7; border-left: 5px solid #ff9800; border-radius: 16px; padding: 16px; margin-top: 20px; text-align: left; }
         .clothing-title { font-weight: bold; font-size: 18px; display: flex; align-items: center; gap: 8px; }
-        .day-group { margin-top: 20px; }
-        .day-header { font-size: 18px; font-weight: bold; background: rgba(255,255,255,0.25); padding: 8px 12px; border-radius: 30px; display: inline-block; margin-bottom: 12px; }
-        .hourly-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px,1fr)); gap: 12px; }
-        .hour-item { background: rgba(255,255,255,0.15); border-radius: 16px; padding: 10px; text-align: center; backdrop-filter: blur(4px); }
-        .hour-time { font-weight: bold; font-size: 15px; margin-bottom: 4px; }
+        .hourly-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px,1fr)); gap: 12px; margin-top: 20px; }
+        .hour-item { background: rgba(255,255,255,0.2); border-radius: 16px; padding: 12px; text-align: center; backdrop-filter: blur(4px); }
+        .hour-time { font-weight: bold; font-size: 16px; margin-bottom: 6px; }
         .hour-temp { font-size: 20px; font-weight: bold; }
-        .hour-desc { font-size: 11px; opacity: 0.9; margin-top: 4px; }
+        .hour-desc { font-size: 12px; opacity: 0.9; margin-top: 4px; }
         .forecast-item { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #eee; }
         .loader { text-align: center; padding: 40px; display: none; }
         .error { background: #fee; color: #c33; padding: 16px; border-radius: 16px; text-align: center; margin-top: 16px; }
         .spinner { width: 40px; height: 40px; border: 4px solid #e0e0e0; border-top-color: #667eea; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto; }
         @keyframes spin { to { transform: rotate(360deg); } }
         footer { text-align: center; color: rgba(255,255,255,0.7); font-size: 12px; padding: 20px; }
-        .note { font-size: 11px; margin-top: 12px; opacity: 0.7; text-align: center; }
     </style>
 </head>
 <body>
 <div class="container">
     <div class="card">
         <h1>🌤 {{ ai_name }}</h1>
-        <div class="subtitle">Погода + одежда + почасовой прогноз на 2 дня</div>
+        <div class="subtitle">Погода + одежда + почасовой прогноз</div>
         <div class="search-box">
             <input type="text" id="cityInput" placeholder="Например: Алатырь, Москва" value="Алатырь">
             <button onclick="getWeather()">🔍</button>
         </div>
         <div class="period-buttons">
             <button class="period-btn" id="todayBtn" onclick="setPeriod('today')">🌡 СЕГОДНЯ</button>
-            <button class="period-btn" id="hourlyBtn" onclick="setPeriod('hourly')">⏰ 48 ЧАСОВ</button>
+            <button class="period-btn" id="hourlyBtn" onclick="setPeriod('hourly')">⏰ ПОЧАСОВО</button>
             <button class="period-btn" id="weekBtn" onclick="setPeriod('week')">📅 НЕДЕЛЯ</button>
         </div>
         <div id="loader" class="loader"><div class="spinner"></div><p>Загрузка...</p></div>
         <div id="weatherResult"></div>
     </div>
-    <footer>Создатель: {{ creator_name }}<br>Данные: Open-Meteo API (обновление каждый час)</footer>
+    <footer>Создатель: {{ creator_name }}<br>Данные: Open-Meteo API</footer>
 </div>
 <script>
     let currentPeriod = 'today';
@@ -292,29 +281,18 @@ HTML_TEMPLATE = """
         document.getElementById('weatherResult').innerHTML = html;
     }
     function displayHourly(data) {
-        // Группируем по дням
-        let groups = {};
+        let items = '';
         for (let h of data) {
-            const day = h.day;
-            if (!groups[day]) groups[day] = [];
-            groups[day].push(h);
+            items += `
+                <div class="hour-item">
+                    <div class="hour-time">${h.time}</div>
+                    <div class="hour-temp">${h.temp}°C</div>
+                    <div class="hour-desc">${h.condition}</div>
+                    <div class="hour-desc">💨 ${h.wind} км/ч</div>
+                    <div class="hour-desc">🌧 ${h.precip} мм</div>
+                </div>`;
         }
-        let html = `<div class="weather-card"><div style="font-size:18px; margin-bottom:16px;">⏰ ПОЧАСОВОЙ ПРОГНОЗ НА 2 ДНЯ (48 часов)</div>`;
-        for (let day in groups) {
-            html += `<div class="day-group"><div class="day-header">📅 ${day}</div><div class="hourly-grid">`;
-            for (let h of groups[day]) {
-                html += `
-                    <div class="hour-item">
-                        <div class="hour-time">${h.time}</div>
-                        <div class="hour-temp">${h.temp}°C</div>
-                        <div class="hour-desc">${h.condition}</div>
-                        <div class="hour-desc">💨 ${h.wind} км/ч</div>
-                        <div class="hour-desc">🌧 ${h.precip} мм</div>
-                    </div>`;
-            }
-            html += `</div></div>`;
-        }
-        html += `<div class="note">📌 Данные обновляются каждый час. Время — местное.</div></div>`;
+        const html = `<div class="weather-card"><div style="font-size:20px; margin-bottom:12px;">⏰ ПОЧАСОВОЙ ПРОГНОЗ (24 часа)</div><div class="hourly-grid">${items}</div></div>`;
         document.getElementById('weatherResult').innerHTML = html;
     }
     function displayWeekly(data) {
@@ -330,6 +308,7 @@ HTML_TEMPLATE = """
 </html>
 """
 
+# === API МАРШРУТЫ ===
 @app.route('/')
 def index():
     return render_template_string(HTML_TEMPLATE, ai_name=AI_NAME, creator_name=CREATOR_NAME)
@@ -359,13 +338,14 @@ def weather():
             'pressure': press_mm, 'condition': condition, 'clothing': clothing
         })
     elif period == 'hourly':
-        hourly = get_hourly_48h(lat, lon)
+        hourly = get_hourly(lat, lon)
         if not hourly:
             return jsonify({'error': 'Не удалось получить почасовой прогноз'})
+        # добавим текстовое описание погоды
         for h in hourly:
             h['condition'] = code2text(h['code'])
         return jsonify(hourly)
-    else:
+    else:  # week
         week = get_weekly(lat, lon)
         if not week:
             return jsonify({'error': 'Ошибка прогноза на неделю'})
@@ -382,11 +362,5 @@ def weather():
         return jsonify(result)
 
 if __name__ == '__main__':
-    print("\n" + "="*60)
-    print("🌤 ПОГОДНЫЙ СЕРВЕР С ПОЧАСОВЫМ ПРОГНОЗОМ НА 2 ДНЯ 🌤")
-    print("="*60)
-    print("\n📱 Локальный доступ: http://localhost:5000")
-    print("\n🖥️  Для доступа с телефона в той же Wi-Fi:")
-    print("   Узнайте IP через ipconfig и откройте http://IP_компьютера:5000")
-    print("\n" + "="*60)
+    print("\n🌤 СЕРВЕР ЗАПУЩЕН → http://localhost:5000")
     app.run(host='0.0.0.0', port=5000, debug=False)
